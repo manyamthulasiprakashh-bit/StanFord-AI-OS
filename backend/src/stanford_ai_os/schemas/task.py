@@ -1,13 +1,13 @@
 """Pydantic schemas for task requests and responses."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     pending = "pending"
     in_progress = "in_progress"
     completed = "completed"
