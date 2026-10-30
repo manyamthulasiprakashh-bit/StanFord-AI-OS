@@ -1,0 +1,33 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Build and coverage artifacts
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# macOS and editors
+.DS_Store
+.vscode/
+.idea/
