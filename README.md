@@ -216,7 +216,7 @@ documented in a later version:
 - A finished user-facing dashboard or frontend.
 - A fully autonomous multi-agent system.
 - Production deployment and production-grade operational infrastructure.
-- Authentication and authorization for a public service.
+- Multi-user authorization and public-service authentication hardening beyond the initial single-user foundation.
 - Retrieval-augmented generation or a complete long-term knowledge system.
 
 The project roadmap may expand as these foundations mature.

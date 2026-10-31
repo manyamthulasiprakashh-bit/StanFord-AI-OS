@@ -9,8 +9,9 @@ from stanford_ai_os.db.models import Task
 from stanford_ai_os.db.session import get_db
 from stanford_ai_os.schemas.task_execution_history import TaskExecutionHistoryRead
 from stanford_ai_os.services import task_execution_history_service
+from stanford_ai_os.services.auth_service import get_current_user
 
-router = APIRouter(tags=["task-execution-history"])
+router = APIRouter(dependencies=[Depends(get_current_user)], tags=["task-execution-history"])
 
 
 @router.get("/tasks/{task_id}/executions", response_model=list[TaskExecutionHistoryRead])

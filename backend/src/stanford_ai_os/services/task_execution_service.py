@@ -30,10 +30,8 @@ from stanford_ai_os.modelrouter.router import (
     get_model_router,
 )
 from stanford_ai_os.modelrouter.types import ModelRequest
-from stanford_ai_os.observability.execution import (
-    ExecutionObservation,
-    log_observation,
-)
+from stanford_ai_os.observability.execution import ExecutionObservation
+from stanford_ai_os.observability.logging_config import log_event
 from stanford_ai_os.schemas.task_execution import TaskExecutionResult
 from stanford_ai_os.services import task_execution_history_service, task_service
 from stanford_ai_os.services.task_execution_history_service import (
@@ -107,7 +105,22 @@ def _error_category(exc: Exception) -> str:
 def _emit_observation(observation: ExecutionObservation, observer: object | None) -> None:
     try:
         if observer is None:
-            log_observation(observation)
+            event = (
+                "execution_succeeded"
+                if observation.outcome == "success"
+                else "execution_failed"
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                event,
+                task_id=observation.task_id,
+                provider=observation.provider,
+                model=observation.model,
+                duration_ms=observation.duration_ms,
+                outcome=observation.outcome,
+                error_category=observation.error_category,
+            )
         elif callable(observer):
             observer(observation)
         elif hasattr(observer, "record") and callable(observer.record):
@@ -115,7 +128,7 @@ def _emit_observation(observation: ExecutionObservation, observer: object | None
         else:
             raise TypeError("observer must be callable or provide a record method")
     except Exception:
-        logger.warning("Task execution observer failed")
+        log_event(logger, logging.WARNING, "execution_observer_failed")
 
 
 def execute_task(
@@ -158,8 +171,16 @@ def execute_task(
             started_at=started_at,
         )
     except Exception as exc:
-        logger.warning("Task execution history could not be created")
+        log_event(logger, logging.WARNING, "execution_history_create_failed", task_id=task_id)
         raise TaskExecutionHistoryError("Execution history could not be recorded") from exc
+
+    log_event(
+        logger,
+        logging.INFO,
+        "execution_started",
+        task_id=task_id,
+        execution_id=running_record.id,
+    )
 
     provider_name: str | None = None
     provider_model: str | None = None
@@ -173,14 +194,31 @@ def execute_task(
         provider_model = _provider_model(provider)
 
         try:
-            task_execution_history_service.update_execution(
+            updated = task_execution_history_service.update_execution(
                 db,
                 running_record.id,
                 provider=provider_name,
                 model=provider_model,
             )
+            if updated is None or updated.status != "running":
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "execution_history_metadata_not_persisted",
+                    task_id=task_id,
+                    execution_id=running_record.id,
+                )
+                raise TaskExecutionHistoryError("Execution history could not be recorded")
+        except TaskExecutionHistoryError:
+            raise
         except Exception as exc:
-            logger.warning("Task execution history metadata could not be updated")
+            log_event(
+                logger,
+                logging.WARNING,
+                "execution_history_metadata_update_failed",
+                task_id=task_id,
+                execution_id=running_record.id,
+            )
             raise TaskExecutionHistoryError("Execution history could not be recorded") from exc
 
         request = ModelRequest(
@@ -203,7 +241,13 @@ def execute_task(
                 completed_at=datetime.now(UTC),
             )
         except Exception:
-            logger.warning("Task execution configuration history could not be updated")
+            log_event(
+                logger,
+                logging.WARNING,
+                "execution_history_update_failed",
+                task_id=task_id,
+                execution_id=running_record.id,
+            )
         _emit_observation(
             ExecutionObservation(
                 task_id=task_id,
@@ -232,9 +276,21 @@ def execute_task(
                 completed_at=datetime.now(UTC),
             )
             if updated is None or not getattr(updated, "_transitioned", False):
-                logger.warning("Task execution failure history was not persisted")
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "execution_history_persist_failed",
+                    task_id=task_id,
+                    execution_id=running_record.id,
+                )
         except Exception:
-            logger.warning("Task execution failure history could not be updated")
+            log_event(
+                logger,
+                logging.WARNING,
+                "execution_history_update_failed",
+                task_id=task_id,
+                execution_id=running_record.id,
+            )
         _emit_observation(
             ExecutionObservation(
                 task_id=task_id,
@@ -270,12 +326,24 @@ def execute_task(
             or not getattr(updated, "_transitioned", False)
             or updated.status != "success"
         ):
-            logger.warning("Task execution success history was not persisted")
+            log_event(
+                logger,
+                logging.WARNING,
+                "execution_history_persist_failed",
+                task_id=task_id,
+                execution_id=running_record.id,
+            )
             raise TaskExecutionHistoryError("Execution history could not be recorded")
     except TaskExecutionHistoryError:
         raise
     except Exception as exc:
-        logger.warning("Task execution success history could not be updated")
+        log_event(
+            logger,
+            logging.WARNING,
+            "execution_history_update_failed",
+            task_id=task_id,
+            execution_id=running_record.id,
+        )
         raise TaskExecutionHistoryError("Execution history could not be recorded") from exc
 
     _emit_observation(

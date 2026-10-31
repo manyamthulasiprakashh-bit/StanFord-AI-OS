@@ -21,6 +21,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     db_path = tmp_path / "reliability.db"
     monkeypatch.setenv("STANFORD_AI_OS_DATABASE_URL", f"sqlite:///{db_path}")
     with TestClient(app) as test_client:
+        login_response = test_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+        test_client.headers.update({"Authorization": f"Bearer {token}"})
         yield test_client
 
 
@@ -92,6 +99,9 @@ def test_terminal_state_already_established_before_success_finalization(
     assert response.json()["detail"] == "Execution history could not be recorded"
     assert len(provider.calls) == 1
 
+    task = client.get(f"/tasks/{created['id']}").json()
+    assert task["status"] == "pending"
+
     history = client.get(f"/tasks/{created['id']}/executions").json()
     assert len(history) == 1
     record = history[0]
@@ -157,6 +167,9 @@ def test_recovery_and_execution_completion_do_not_overwrite_terminal_state(
     record = history[0]
     assert record["status"] == "failure"
     assert record["error_category"] == "interrupted"
+
+    task = client.get(f"/tasks/{created['id']}").json()
+    assert task["status"] == "pending"
 
 
 def test_unsupported_provider_configuration_returns_502_and_failure_history(

@@ -20,6 +20,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     db_path = tmp_path / "history_integration.db"
     monkeypatch.setenv("STANFORD_AI_OS_DATABASE_URL", f"sqlite:///{db_path}")
     with TestClient(app) as test_client:
+        login_response = test_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+        test_client.headers.update({"Authorization": f"Bearer {token}"})
         yield test_client
 
 
@@ -154,11 +161,15 @@ def test_success_history_update_failure_returns_500(
     provider = FakeProvider()
     calls: list[dict[str, Any]] = []
 
+    class UpdatedRecord:
+        status = "running"
+        _transitioned = True
+
     def fake_update(db, execution_id, **kwargs):
         calls.append(kwargs)
         if len(calls) == 2:
             raise task_execution_history_service.TaskExecutionHistoryError("boom")
-        return None
+        return UpdatedRecord()
 
     monkeypatch.setattr(
         "stanford_ai_os.services.task_execution_service.get_model_router",
@@ -183,11 +194,15 @@ def test_failure_history_update_error_does_not_leak_details(
     provider = FakeProvider(error=ProviderError("secret provider details"))
     calls: list[dict[str, Any]] = []
 
+    class UpdatedRecord:
+        status = "running"
+        _transitioned = True
+
     def fake_update(db, execution_id, **kwargs):
         calls.append(kwargs)
         if len(calls) == 2:
             raise task_execution_history_service.TaskExecutionHistoryError("secret update details")
-        return None
+        return UpdatedRecord()
 
     monkeypatch.setattr(
         "stanford_ai_os.services.task_execution_service.get_model_router",

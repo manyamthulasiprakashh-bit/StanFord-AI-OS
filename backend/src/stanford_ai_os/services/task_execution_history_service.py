@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -9,6 +10,9 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from stanford_ai_os.db.models import TaskExecution
+from stanford_ai_os.observability.logging_config import log_event
+
+logger = logging.getLogger(__name__)
 
 
 def create_execution(
@@ -108,18 +112,40 @@ def update_execution(
             execution._transitioned = result.rowcount == 1
         return execution
 
+    # Metadata-only updates are also conditional. A terminal record must not be
+    # modified by a stale or late metadata update.
+    values = {}
     if provider is not _UNSET:
-        execution.provider = provider  # type: ignore[assignment]
+        values["provider"] = provider
     if model is not _UNSET:
-        execution.model = model  # type: ignore[assignment]
+        values["model"] = model
     if duration_ms is not _UNSET:
-        execution.duration_ms = duration_ms  # type: ignore[assignment]
+        values["duration_ms"] = duration_ms
     if error_category is not _UNSET:
-        execution.error_category = error_category  # type: ignore[assignment]
+        values["error_category"] = error_category
     if started_at is not _UNSET:
-        execution.started_at = started_at  # type: ignore[assignment]
+        values["started_at"] = started_at
     if completed_at is not _UNSET:
-        execution.completed_at = completed_at  # type: ignore[assignment]
+        values["completed_at"] = completed_at
+
+    if values:
+        result = db.execute(
+            update(TaskExecution)
+            .where(
+                TaskExecution.id == str(execution_id),
+                TaskExecution.status == "running",
+            )
+            .values(**values)
+        )
+        if result.rowcount not in (0, 1):
+            raise RuntimeError("Unexpected number of execution rows updated")
+
+        db.commit()
+        db.expire_all()
+        execution = db.get(TaskExecution, str(execution_id))
+        if execution is not None:
+            execution._transitioned = result.rowcount == 1
+        return execution
 
     db.commit()
     db.refresh(execution)
@@ -192,7 +218,17 @@ def recover_execution(db: Session, execution_id: UUID | str) -> TaskExecution | 
 
     # Clear stale ORM state before reloading the authoritative database row.
     db.expire_all()
-    return db.get(TaskExecution, execution_id_str)
+    reloaded = db.get(TaskExecution, execution_id_str)
+    if result.rowcount == 1 and reloaded is not None:
+        log_event(
+            logger,
+            logging.INFO,
+            "execution_recovered",
+            execution_id=execution_id_str,
+            task_id=reloaded.task_id,
+            error_category="interrupted",
+        )
+    return reloaded
 
 
 # Compatibility aliases for tests or callers using alternate names.

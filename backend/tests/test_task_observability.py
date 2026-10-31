@@ -24,6 +24,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     db_path = tmp_path / "tasks.db"
     monkeypatch.setenv("STANFORD_AI_OS_DATABASE_URL", f"sqlite:///{db_path}")
     with TestClient(app) as test_client:
+        login_response = test_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+        test_client.headers.update({"Authorization": f"Bearer {token}"})
         yield test_client
 
 

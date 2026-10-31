@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from stanford_ai_os.db.session import get_db
 from stanford_ai_os.schemas.task import TaskCreate, TaskRead
 from stanford_ai_os.services import task_service
+from stanford_ai_os.services.auth_service import get_current_user
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(dependencies=[Depends(get_current_user)], prefix="/tasks", tags=["tasks"])
 
 
 @router.post("", response_model=TaskRead, status_code=201)

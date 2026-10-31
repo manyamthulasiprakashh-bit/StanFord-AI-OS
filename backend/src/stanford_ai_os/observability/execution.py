@@ -8,6 +8,8 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from .logging_config import log_event
+
 Outcome = Literal["success", "failure"]
 
 
@@ -36,14 +38,16 @@ logger = logging.getLogger(__name__)
 def log_observation(observation: ExecutionObservation) -> None:
     """Log an observation without prompts, outputs, keys, or raw errors."""
 
-    logger.info(
-        "task_execution outcome=%s task_id=%s provider=%s model=%s duration_ms=%d category=%s",
-        observation.outcome,
-        observation.task_id,
-        observation.provider,
-        observation.model,
-        observation.duration_ms,
-        observation.error_category,
+    log_event(
+        logger,
+        logging.INFO,
+        "task_execution",
+        task_id=observation.task_id,
+        provider=observation.provider,
+        model=observation.model,
+        duration_ms=observation.duration_ms,
+        outcome=observation.outcome,
+        error_category=observation.error_category,
     )
 
 

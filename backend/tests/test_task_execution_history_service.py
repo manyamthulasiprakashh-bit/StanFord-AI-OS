@@ -191,3 +191,48 @@ def test_session_lifecycle_persists_across_sessions(db_path: Path) -> None:
     finally:
         second_session.close()
         engine.dispose()
+
+
+def test_metadata_can_be_updated_while_running(session) -> None:
+    db = session
+    task = Task(title="Metadata task", description="Details")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    execution = history_service.create_execution(
+        db, task_id=task.id, status="running", provider=None, model=None
+    )
+
+    updated = history_service.update_execution(
+        db, execution.id, provider="nvidia", model="test-model"
+    )
+
+    assert updated is not None
+    assert updated.status == "running"
+    assert updated.provider == "nvidia"
+    assert updated.model == "test-model"
+    assert getattr(updated, "_transitioned", False) is True
+
+
+def test_metadata_only_update_does_not_overwrite_terminal_record(session) -> None:
+    db = session
+    task = Task(title="Terminal metadata task", description="Details")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    execution = history_service.create_execution(
+        db, task_id=task.id, status="running", provider="original", model="original-model"
+    )
+    history_service.update_execution(db, execution.id, status="success")
+
+    updated = history_service.update_execution(
+        db, execution.id, provider="changed", model="changed-model"
+    )
+
+    assert updated is not None
+    assert updated.status == "success"
+    assert updated.provider == "original"
+    assert updated.model == "original-model"
+    assert getattr(updated, "_transitioned", True) is False

@@ -25,6 +25,13 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def client(db_path: Path) -> TestClient:
     with TestClient(app) as test_client:
+        login_response = test_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+        test_client.headers.update({"Authorization": f"Bearer {token}"})
         yield test_client
 
 

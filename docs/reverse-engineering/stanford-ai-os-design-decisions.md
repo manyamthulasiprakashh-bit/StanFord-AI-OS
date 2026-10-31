@@ -132,3 +132,39 @@
 - `evaluate_execution` provides deterministic checks for required substrings, forbidden substrings, and maximum output length.
 - Evaluation is intentionally not a measurement of semantic model quality.
 - No task status changes, tool execution, background workers, queues, or persistence were added.
+
+## Phase 7 authentication foundation
+
+### Verified observations about oc8
+
+- oc8 has identity, local password authentication, principals, and authorization components. Verified in `oc8/ARCHITECTURE.md` and `oc8/backend/src/oc8/auth/`.
+- oc8 uses more advanced authorization and multi-tenancy concepts than Stanford-AI OS currently needs.
+
+### Stanford-AI OS decisions
+
+- Authentication is intentionally minimal and single-user.
+- Passwords are hashed with Argon2 and never stored in plaintext.
+- JWTs are signed with a required secret key and include expiration.
+- Bearer tokens are used instead of cookies to avoid CSRF complexity.
+- All task, execution, and history endpoints require authentication.
+- `/health` remains public.
+- No roles, refresh tokens, password reset, or multi-user ownership are implemented yet.
+- The design can later support multi-user access by adding ownership fields and authorization checks.
+
+## Phase 7 authentication foundation
+
+### Verified observations about oc8
+
+- oc8 has identity, local password authentication, principals, and authorization components. Verified in `oc8/ARCHITECTURE.md` and `oc8/backend/src/oc8/auth/`.
+- oc8 uses more advanced authorization and multi-tenancy concepts than Stanford-AI OS currently needs.
+
+### Stanford-AI OS decisions
+
+- Authentication is intentionally minimal and single-user.
+- Passwords are hashed with Argon2 and never stored in plaintext.
+- JWTs are signed with a required secret key and include expiration.
+- Bearer tokens are used instead of cookies to avoid CSRF complexity.
+- All task, execution, and history endpoints require authentication.
+- `/health` remains public.
+- No roles, refresh tokens, password reset, or multi-user ownership are implemented yet.
+- The design can later support multi-user access by adding ownership fields and authorization checks.

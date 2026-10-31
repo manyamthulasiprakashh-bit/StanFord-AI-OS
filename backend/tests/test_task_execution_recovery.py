@@ -151,6 +151,31 @@ def test_recovery_does_not_change_task_status(session) -> None:
     assert refreshed_task.status == "pending"
 
 
+def test_recover_execution_preserves_null_metadata(session) -> None:
+    db, _engine = session
+    task = _create_task(db)
+    execution = _create_execution(
+        db,
+        task,
+        provider=None,
+        model=None,
+        duration_ms=None,
+        started_at=None,
+        completed_at=None,
+    )
+
+    recovered = history_service.recover_execution(db, execution.id)
+
+    assert recovered is not None
+    assert recovered.status == "failure"
+    assert recovered.error_category == "interrupted"
+    assert recovered.provider is None
+    assert recovered.model is None
+    assert recovered.duration_ms is None
+    assert recovered.started_at is None
+    assert recovered.completed_at is not None
+
+
 def test_recovery_does_not_require_provider() -> None:
     # The function signature has no provider parameter.
     import inspect
@@ -196,3 +221,94 @@ def test_stale_terminal_state_is_not_overwritten(session) -> None:
     assert refreshed is not None
     assert refreshed.status == "success"
     assert refreshed.error_category is None
+
+
+def test_concurrent_recovery_from_separate_sessions(tmp_path: Path) -> None:
+    db_path = tmp_path / "concurrent_recovery.db"
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    first_session = session_factory()
+    second_session = session_factory()
+    try:
+        task = Task(title="Concurrent recovery task", description="Details")
+        first_session.add(task)
+        first_session.commit()
+        first_session.refresh(task)
+
+        execution = TaskExecution(task_id=task.id, status="running")
+        first_session.add(execution)
+        first_session.commit()
+        first_session.refresh(execution)
+        execution_id = execution.id
+
+        first_result = history_service.recover_execution(first_session, execution_id)
+        second_result = history_service.recover_execution(second_session, execution_id)
+
+        assert first_result is not None
+        assert second_result is not None
+        assert first_result.status == "failure"
+        assert second_result.status == "failure"
+        assert first_result.error_category == "interrupted"
+        assert second_result.error_category == "interrupted"
+
+        first_refreshed = first_session.get(TaskExecution, execution_id)
+        second_refreshed = second_session.get(TaskExecution, execution_id)
+        assert first_refreshed is not None
+        assert second_refreshed is not None
+        assert first_refreshed.status == "failure"
+        assert second_refreshed.status == "failure"
+        assert first_refreshed.completed_at == second_refreshed.completed_at
+    finally:
+        first_session.close()
+        second_session.close()
+        engine.dispose()
+
+
+def test_recover_execution_propagates_commit_failure(tmp_path: Path) -> None:
+    db_path = tmp_path / "commit_failure.db"
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    db = session_factory()
+
+    try:
+        task = Task(title="Commit failure task", description="Details")
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
+        execution = TaskExecution(task_id=task.id, status="running")
+        db.add(execution)
+        db.commit()
+        db.refresh(execution)
+
+        original_commit = db.commit
+
+        def failing_commit() -> None:
+            raise RuntimeError("commit failed")
+
+        db.commit = failing_commit
+        with pytest.raises(RuntimeError, match="commit failed"):
+            history_service.recover_execution(db, execution.id)
+
+        db.commit = original_commit
+        db.rollback()
+
+        refreshed = db.get(TaskExecution, execution.id)
+        assert refreshed is not None
+        assert refreshed.status == "running"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_recover_execution_does_not_invoke_model_provider() -> None:
+    import inspect
+
+    assert "provider" not in inspect.signature(history_service.recover_execution).parameters
+
+    source = inspect.getsource(history_service.recover_execution)
+    assert ".generate(" not in source
+    assert "get_model_router" not in source

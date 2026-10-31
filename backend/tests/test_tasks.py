@@ -14,6 +14,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     db_path = tmp_path / "tasks.db"
     monkeypatch.setenv("STANFORD_AI_OS_DATABASE_URL", f"sqlite:///{db_path}")
     with TestClient(app) as test_client:
+        login_response = test_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+        test_client.headers.update({"Authorization": f"Bearer {token}"})
         yield test_client
 
 
@@ -74,10 +81,26 @@ def test_task_persists_across_connections(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("STANFORD_AI_OS_DATABASE_URL", f"sqlite:///{db_path}")
 
     with TestClient(app) as first_client:
+        login = first_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login.status_code == 200
+        first_client.headers.update(
+            {"Authorization": f"Bearer {login.json()['access_token']}"}
+        )
         created = first_client.post("/tasks", json={"title": "Persistent task"})
         assert created.status_code == 201
 
     with TestClient(app) as second_client:
+        login = second_client.post(
+            "/auth/login",
+            json={"username": "admin", "password": "test-admin-password"},
+        )
+        assert login.status_code == 200
+        second_client.headers.update(
+            {"Authorization": f"Bearer {login.json()['access_token']}"}
+        )
         response = second_client.get("/tasks")
         assert response.status_code == 200
         assert len(response.json()) == 1
